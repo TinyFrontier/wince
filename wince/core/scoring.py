@@ -9,9 +9,9 @@ from .questions import BLAST_LABELS, LABELS, NOUL, QUESTIONS_VERSION, RISK, File
 @dataclass
 class Verdict:
     level: str  # green | yellow | red
-    risk: float
+    risk: float  # heuristic policy score in [0, 1], not a probability; shown as "review score N/100"
     confidence: float
-    reading_order: list[tuple[str, str, float]]  # file, hunk, priority
+    reading_order: list[tuple[str, str, float]]  # file, hunk, priority — experimental, see README
     reviewers: list[str]
     hard_flags: list[str]
     flags: dict[str, float]
@@ -73,7 +73,7 @@ def score(files: list[FileChange], answered: list, hard: tuple, cfg: dict, offli
     order = []  # F-18
     for f, a in got:
         for h in f.hunks:
-            p = a.hunk_probs.get(h.id, 0.0) * a.flags["bug_risk"] * a.flags["blast_radius"]
+            p = a.hunk_probs.get(h.id, 0.0) * a.flags["runtime_effect"] * a.flags["blast_radius"]
             if p >= t["min_hunk_priority"]:
                 order.append((f.path, h.id, round(p, 3)))
     order.sort(key=lambda x: (-x[2], x[0], x[1]))

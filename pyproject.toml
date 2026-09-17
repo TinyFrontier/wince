@@ -1,7 +1,7 @@
 [project]
 name = "wince"
 version = "0.1.0"
-description = "Semantic risk router for code changes: how carefully to review, who should, where to look first"
+description = "Routes human review attention: green/yellow/red for a diff, who should look. It doesn't review the code."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

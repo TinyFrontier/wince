@@ -9,12 +9,12 @@ def _git(*args: str) -> str:
     return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout
 
 
-def local(target: str) -> tuple[str, "str | None"]:
-    """merge-base(HEAD, origin/<target>)...HEAD with -U5 --find-renames (F-1); title = last commit subject."""
+def local(target: str) -> str:
+    """merge-base(HEAD, origin/<target>)...HEAD with -U5 --find-renames (F-1)."""
     ref = f"origin/{target}"
     if subprocess.run(["git", "rev-parse", "--verify", "-q", ref], capture_output=True).returncode != 0:
         ref = target
-    return _git("diff", "--unified=5", "--find-renames", f"{ref}...HEAD"), _git("log", "-1", "--format=%s").strip() or None
+    return _git("diff", "--unified=5", "--find-renames", f"{ref}...HEAD")
 
 
 def stdin() -> str:

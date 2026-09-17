@@ -69,7 +69,7 @@ def one(path, body="-a\n+b\n", header="@@ -1 +1 @@"):
 
 
 def fa(blast=0.5, conf=0.9, bug=0.5, hunks=None, **flags):
-    f = {"auth_logic": 0.0, "data_write": 0.0, "error_weakened": 0.0, "contract_break": 0.0, "bug_risk": bug, "blast_radius": blast}
+    f = {"auth_logic": 0.0, "data_write": 0.0, "error_weakened": 0.0, "contract_break": 0.0, "runtime_effect": bug, "blast_radius": blast}
     f.update(flags)
     return FileAnswers(f, conf, hunks or {"h1": 1.0})
 
@@ -133,17 +133,18 @@ def test_levels():
     assert red.risk == round(min(1, 0.5 * 1.0 * 1.15), 3) and "auth logic changed (0.93)" in red.reasons
     assert red.files["README.md"]["blast_radius"] == 0.0 and red.flags["auth_logic"] == 0.93
     assert scoring.score([], [], NONE, CFG).level == "green"
-    off = cli.evaluate(GIT_DIFF, None, CFG, offline=True)
+    off = cli.evaluate(GIT_DIFF, CFG, offline=True)
     assert off.level == "yellow" and off.hard_flags == ["dba", "security"] and off.degraded
 
 
 def test_render_stable():
-    v = cli.evaluate(GIT_DIFF, None, CFG, offline=True)
-    a, b = render.json_(v), render.json_(cli.evaluate(GIT_DIFF, None, CFG, offline=True))
+    v = cli.evaluate(GIT_DIFF, CFG, offline=True)
+    a, b = render.json_(v), render.json_(cli.evaluate(GIT_DIFF, CFG, offline=True))
     assert a == b and json.loads(a)["level"] == "yellow"
     md = render.markdown(v, note="offline")
     assert md.startswith(render.MARKER) and "<details>" in md and "_offline_" in md
-    assert "Suggested reviewers: @dba @security" in render.text(v)
+    t = render.text(v)
+    assert "Suggested reviewers: @dba @security" in t and "review score 0/100" in t and "risk" not in t.split("\n")[0]
 
 
 class FakeClient:
@@ -169,11 +170,11 @@ def test_ask_wiring():
     boom = diff.FileChange("boom", "modified", [diff.Hunk("h1", "@@", "+x")])
     FakeClient.calls = []
     with patch.object(questions, "TypeSafeClient", FakeClient), patch("sys.stderr", io.StringIO()):
-        ans = questions.ask_all([perms, readme, boom, moved], "PR title")
+        ans = questions.ask_all([perms, readme, boom, moved])
     assert ans[2] is None and ans[0].flags["blast_radius"] == 0.75 and ans[0].confidence == 0.9
     assert ans[0].hunk_probs == {"h1": 0.3, "h2": 0.7} and ans[1].hunk_probs == {"h1": 1.0} and ans[3].hunk_probs == {}  # F-10
     state, qs = FakeClient.calls[0]
-    assert state["title"] == "PR title" and [h["id"] for h in state["hunks"]] == ["h1", "h2"]
+    assert "title" not in state and [h["id"] for h in state["hunks"]] == ["h1", "h2"]  # diff only, no context
     assert set(qs) == {*questions.NOUL, "blast_radius", "riskiest_hunk"} and "riskiest_hunk" not in FakeClient.calls[1][1]
     assert FakeClient.calls[3][0]["old_path"] == "old.py" and FakeClient.calls[3][0]["hunks"] == []
     v = scoring.score(files, list(zip([perms, readme, boom], ans)), NONE, CFG)
@@ -199,20 +200,20 @@ def test_unevaluated_files_never_green():  # P1: excluded / binary files are not
     secret = one("secrets/token.txt")
     wasm = "diff --git a/app.wasm b/app.wasm\nindex 1..2 100644\nBinary files a/app.wasm and b/app.wasm differ\n"
     for text, why in ((secret, "excluded from API"), (wasm, "binary")):
-        v = cli.evaluate(text, None, CFG, offline=False)  # nothing sendable -> no network
+        v = cli.evaluate(text, CFG, offline=False)  # nothing sendable -> no network
         assert v.level == "yellow" and v.degraded and v.confidence == 0.0 and any(why in r for r in v.reasons), (text, v)
-        assert cli.evaluate(text, None, CFG, offline=True).level == "yellow"
+        assert cli.evaluate(text, CFG, offline=True).level == "yellow"
 
 
 def test_hunkless_files_are_evaluated():  # pure rename / mode flip: sent to the model, never a silent green
     for text in (rename("app/utils.py", "app/util.py", hunk=False),
                  "diff --git a/bin/deploy.sh b/bin/deploy.sh\nold mode 100755\nnew mode 100644\n"):
         assert [f.path for f in rules.partition(diff.parse(text), CFG)[1]]  # sendable
-        v = cli.evaluate(text, None, CFG, offline=True)
+        v = cli.evaluate(text, CFG, offline=True)
         assert v.level == "yellow" and v.degraded, text
     FakeClient.calls = []
     with patch.object(questions, "TypeSafeClient", FakeClient):
-        cli.evaluate("diff --git a/bin/deploy.sh b/bin/deploy.sh\nold mode 100755\nnew mode 100644\n", None, CFG, offline=False)
+        cli.evaluate("diff --git a/bin/deploy.sh b/bin/deploy.sh\nold mode 100755\nnew mode 100644\n", CFG, offline=False)
     assert FakeClient.calls[0][0]["mode_change"] == "100755 -> 100644"
 
 
@@ -225,17 +226,17 @@ def test_rename_keeps_source_path():  # P2: auth/check.py -> utils/check.py stil
 
 def test_ignore_needs_every_path():  # a move out of (or into) gen/ is a real change; gen/ -> gen/ is not
     for src, dst in (("gen/check.py", "auth/check.py"), ("auth/check.py", "gen/check.py")):
-        v = cli.evaluate(rename(src, dst), None, CFG, offline=True)
+        v = cli.evaluate(rename(src, dst), CFG, offline=True)
         assert v.hard_flags == ["security"] and v.level == "yellow", (src, dst)
-    assert cli.evaluate(rename("gen/a.py", "gen/b.py"), None, CFG, offline=True).reasons == ["all 1 changed file(s) ignored"]
+    assert cli.evaluate(rename("gen/a.py", "gen/b.py"), CFG, offline=True).reasons == ["all 1 changed file(s) ignored"]
     assert [f.path for f in rules.partition(diff.parse(rename("tests/x.py", "app/x.py")), CFG)[1]] == ["app/x.py"]  # rules_only too
 
 
 def test_rules_only_files():  # tests/docs: path rules + size, never the model, never block green
-    v = cli.evaluate(one("docs/api.md", "-Returns an array.\n+Returns {items}.\n"), None, CFG, offline=False)
+    v = cli.evaluate(one("docs/api.md", "-Returns an array.\n+Returns {items}.\n"), CFG, offline=False)
     assert v.level == "green" and not v.degraded and v.confidence == 1.0 and "1 file(s) rules-only" in v.reasons[0]
-    assert cli.evaluate(one("tests/fixtures/seed.sql"), None, CFG, offline=True).hard_flags == ["dba"]  # path rules still apply
-    assert cli.evaluate(one("secrets/notes.md"), None, CFG, offline=False).degraded  # exclude_from_api wins over rules_only
+    assert cli.evaluate(one("tests/fixtures/seed.sql"), CFG, offline=True).hard_flags == ["dba"]  # path rules still apply
+    assert cli.evaluate(one("secrets/notes.md"), CFG, offline=False).degraded  # exclude_from_api wins over rules_only
 
 
 def test_bad_input_is_an_error():  # P2: not-a-diff or a cut-off diff must not become "no changes"
@@ -243,11 +244,11 @@ def test_bad_input_is_an_error():  # P2: not-a-diff or a cut-off diff must not b
                  "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n",  # headers, no hunk
                  "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,3 +1,3 @@\n-a\n"):  # cut inside a hunk
         try:
-            cli.evaluate(text, None, CFG, offline=True)
+            cli.evaluate(text, CFG, offline=True)
             raise AssertionError(f"expected ValueError for {text!r}")
         except ValueError:
             pass
-    assert cli.evaluate("   \n", None, CFG, offline=True).level == "green"  # whitespace-only = no changes
+    assert cli.evaluate("   \n", CFG, offline=True).level == "green"  # whitespace-only = no changes
     with patch("sys.stdin", io.StringIO("this is not a diff")), patch("sys.stderr", io.StringIO()):
         try:
             cli.main(["check", "--stdin", "--offline"])
@@ -268,7 +269,7 @@ def test_fork_pr_posting_fails_softly():  # P2: read-only GITHUB_TOKEN on fork P
         raise urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
 
     with patch.dict(os.environ, {"GITHUB_EVENT_PATH": str(path), "GITHUB_TOKEN": "t"}), \
-         patch.object(inputs, "local", lambda target: (GIT_DIFF, "t")), \
+         patch.object(inputs, "local", lambda target: GIT_DIFF), \
          patch.object(github, "upsert_comment", refuse), \
          patch("sys.stdout", io.StringIO()), patch("sys.stderr", io.StringIO()) as err:
         assert cli.main(["ci", "github"]) == 0 and len(posted) == 1  # offline (fork), tried once, job still green
