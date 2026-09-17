@@ -1,0 +1,32 @@
+diff --git a/db/migrations/0182_orders_status_index.sql b/db/migrations/0182_orders_status_index.sql
+new file mode 100644
+index 0000000..5f1c2aa
+--- /dev/null
++++ b/db/migrations/0182_orders_status_index.sql
+@@ -0,0 +1,4 @@
++-- speed up the fulfilment queue
++ALTER TABLE orders ADD COLUMN archived_at TIMESTAMP NULL;
++CREATE INDEX ix_orders_status ON orders(status) WHERE archived_at IS NULL;
++UPDATE orders SET archived_at = NOW() WHERE status = 'cancelled';
+diff --git a/src/repo/orders.py b/src/repo/orders.py
+index 7d3c1e2..9a4b8f1 100644
+--- a/src/repo/orders.py
++++ b/src/repo/orders.py
+@@ -40,9 +40,15 @@ class OrderRepo:
+     def mark_shipped(self, order_id: int) -> None:
+         self.db.execute("UPDATE orders SET status = 'shipped' WHERE id = %s", (order_id,))
+ 
+-    def cancel(self, order_id: int) -> None:
+-        self.db.execute("UPDATE orders SET status = 'cancelled' WHERE id = %s", (order_id,))
++    def cancel(self, order_id: int, archive: bool = True) -> None:
++        self.db.execute(
++            "UPDATE orders SET status = 'cancelled', archived_at = CASE WHEN %s THEN NOW() ELSE NULL END WHERE id = %s",
++            (archive, order_id),
++        )
++
++    def purge_archived(self, older_than_days: int) -> int:
++        return self.db.execute("DELETE FROM orders WHERE archived_at < NOW() - INTERVAL '%s days'", (older_than_days,)).rowcount
+ 
+     def get(self, order_id: int) -> Order | None:
+         row = self.db.fetchone("SELECT * FROM orders WHERE id = %s", (order_id,))
+         return Order(**row) if row else None

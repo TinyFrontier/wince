@@ -1,0 +1,24 @@
+diff --git a/src/services/notify.py b/src/services/notify.py
+index abc1234..def5678 100644
+--- a/src/services/notify.py
++++ b/src/services/notify.py
+@@ -18,13 +18,12 @@ class Notifier:
+     def send(self, user_id: int, message: str) -> None:
+         user = self.users.get(user_id)
+-        if user is None:
+-            raise UserNotFound(user_id)
+-        try:
+-            self.client.push(user.device_token, message)
+-        except PushError as e:
+-            log.warning("push failed for %s: %s", user_id, e)
+-            self.queue.retry_later(user_id, message)
++        if user is None:
++            return
++        try:
++            self.client.push(user.device_token, message)
++        except Exception:
++            pass
+ 
+     def broadcast(self, message: str) -> None:
+         for user in self.users.all():
+             self.send(user.id, message)

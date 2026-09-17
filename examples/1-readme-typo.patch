@@ -1,0 +1,14 @@
+diff --git a/README.md b/README.md
+index 3b18e51..a1c9f0e 100644
+--- a/README.md
++++ b/README.md
+@@ -1,7 +1,7 @@
+ # Shop
+ 
+-A small e-comerce backend used for demos.
++A small e-commerce backend used for demos.
+ 
+ ## Running
+ 
+-Run `make dev` and open http://localhost:8000.
++Run `make dev`, then open http://localhost:8000.
